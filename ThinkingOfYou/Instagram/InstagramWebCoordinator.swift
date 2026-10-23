@@ -179,13 +179,13 @@ final class InstagramWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegat
         updateNativeScrollLock()
     }
 
-    /// Native half of "no scrolling to the next reel": the page's own scroll
-    /// view is frozen on a single-reel page while locked.
+    /// The native scroll view is never frozen. Freezing it on reel pages could
+    /// stay stuck after a same-document hop back into a DM thread, and Instagram's
+    /// reel viewer scrolls in its own container anyway, so the one-reel lock
+    /// lives entirely in Cage.js (attached only on locked reel pages).
     private func updateNativeScrollLock() {
-        let path = webView.url.map(CageRules.pathWithSlash) ?? "/"
-        let freeze = !isUnlocked && CageRules.anyReelCode(inPath: path) != nil
-        if webView.scrollView.isScrollEnabled == freeze {
-            webView.scrollView.isScrollEnabled = !freeze
+        if !webView.scrollView.isScrollEnabled {
+            webView.scrollView.isScrollEnabled = true
         }
     }
 

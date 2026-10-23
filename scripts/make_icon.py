@@ -1,7 +1,8 @@
 """Generates Thinking Of You's 1024x1024 app icon (opaque RGB PNG, no alpha).
 
-A glossy cream heart with a soft drop shadow on a rose -> coral diagonal
-gradient. Pure Pillow, no assets.
+A deep pink heart on a dark gray background, nothing else. The heart has a
+soft top-to-bottom gradient and a faint highlight so it doesn't look flat.
+Pure Pillow, no assets.
 Usage: python3 make_icon.py <output.png>
 """
 import math
@@ -21,27 +22,21 @@ def lerp(a, b, t):
     return tuple(round(a[i] * (1 - t) + b[i] * t) for i in range(3))
 
 
-CORAL, ROSE, DEEP = hexrgb(0xFFA48C), hexrgb(0xF2668B), hexrgb(0xC9426E)
-CREAM_TOP, CREAM_BOTTOM = hexrgb(0xFFFBF5), hexrgb(0xFFE4DC)
-SHADOW = hexrgb(0x9E2F57)
+GRAY_TOP, GRAY_BOTTOM = hexrgb(0x2B282B), hexrgb(0x1C1A1C)
+PINK_TOP, PINK_BOTTOM = hexrgb(0xC2185B), hexrgb(0x8C0F45)
+SHADOW = hexrgb(0x0E0C0E)
+
+
+def vertical(top, bottom):
+    strip = Image.new("RGB", (1, 256))
+    for y in range(256):
+        strip.putpixel((0, y), lerp(top, bottom, y / 255))
+    return strip.resize((N, N), Image.BICUBIC)
+
 
 # ---------------------------------------------------------------- background
-# Diagonal gradient: coral at the top-left, rose at the bottom-right. Drawn on
-# a small canvas and upscaled (smooth and fast), then a faint vignette.
-small = 256
-bg = Image.new("RGB", (small, small))
-px = bg.load()
-for y in range(small):
-    for x in range(small):
-        t = (x + y) / (2 * (small - 1))
-        c = lerp(CORAL, ROSE, min(1.0, t * 1.15)) if t < 0.87 else lerp(ROSE, DEEP, (t - 0.87) / 0.13 * 0.5)
-        px[x, y] = c
-img = bg.resize((N, N), Image.BICUBIC)
+img = vertical(GRAY_TOP, GRAY_BOTTOM)
 
-glow = Image.new("L", (N, N), 0)
-ImageDraw.Draw(glow).ellipse([-N * 0.25, -N * 0.30, N * 0.85, N * 0.70], fill=90)
-glow = glow.filter(ImageFilter.GaussianBlur(N * 0.12))
-img = Image.composite(Image.new("RGB", (N, N), hexrgb(0xFFD3C2)), img, glow)
 
 # ---------------------------------------------------------------- heart shape
 def heart_points(cx, cy, scale, steps=720):
@@ -59,38 +54,22 @@ scale = N * 0.0215
 heart = Image.new("L", (N, N), 0)
 ImageDraw.Draw(heart).polygon(heart_points(cx, cy, scale), fill=255)
 
-# Soft drop shadow below the heart.
+# Soft shadow below the heart.
 shadow = heart.filter(ImageFilter.GaussianBlur(N * 0.03))
-shadow = ImageChops.offset(shadow, 0, int(N * 0.028)).point(lambda v: int(v * 0.45))
+shadow = ImageChops.offset(shadow, 0, int(N * 0.025)).point(lambda v: int(v * 0.6))
 img = Image.composite(Image.new("RGB", (N, N), SHADOW), img, shadow)
 
-# Heart body: vertical cream gradient.
-fill = Image.new("RGB", (1, 256))
-for y in range(256):
-    fill.putpixel((0, y), lerp(CREAM_TOP, CREAM_BOTTOM, y / 255))
-fill = fill.resize((N, N), Image.BICUBIC)
-img = Image.composite(fill, img, heart)
+# Heart body: deep pink gradient.
+img = Image.composite(vertical(PINK_TOP, PINK_BOTTOM), img, heart)
 
-# Inner rim: a slightly rosier edge so the heart reads as rounded.
-rim = ImageChops.subtract(heart, heart.filter(ImageFilter.GaussianBlur(N * 0.02)))
-rim = rim.point(lambda v: min(255, int(v * 1.4)))
-img = Image.composite(Image.new("RGB", (N, N), hexrgb(0xF6B3B8)), img, rim)
-
-# Gloss: a white highlight on the upper-left lobe, clipped to the heart.
+# Faint highlight on the upper-left lobe, clipped to the heart.
 gloss = Image.new("L", (N, N), 0)
 gx, gy = cx - scale * 7.2, cy - scale * 6.4
-ImageDraw.Draw(gloss).ellipse([gx - scale * 4.6, gy - scale * 2.9, gx + scale * 4.6, gy + scale * 2.9], fill=235)
+ImageDraw.Draw(gloss).ellipse([gx - scale * 4.6, gy - scale * 2.9, gx + scale * 4.6, gy + scale * 2.9], fill=70)
 gloss = gloss.rotate(28, center=(gx, gy), resample=Image.BICUBIC)
-gloss = gloss.filter(ImageFilter.GaussianBlur(N * 0.012))
+gloss = gloss.filter(ImageFilter.GaussianBlur(N * 0.02))
 gloss = ImageChops.multiply(gloss, heart)
-img = Image.composite(Image.new("RGB", (N, N), (255, 255, 255)), img, gloss)
-
-# Small sparkle dot next to the gloss.
-dot = Image.new("L", (N, N), 0)
-dx, dy, dr = cx + scale * 6.6, cy - scale * 8.2, scale * 1.15
-ImageDraw.Draw(dot).ellipse([dx - dr, dy - dr, dx + dr, dy + dr], fill=200)
-dot = ImageChops.multiply(dot.filter(ImageFilter.GaussianBlur(N * 0.004)), heart)
-img = Image.composite(Image.new("RGB", (N, N), (255, 255, 255)), img, dot)
+img = Image.composite(Image.new("RGB", (N, N), hexrgb(0xE04E86)), img, gloss)
 
 out = img.resize((1024, 1024), Image.LANCZOS).convert("RGB")
 out.save(sys.argv[1], "PNG", optimize=True)

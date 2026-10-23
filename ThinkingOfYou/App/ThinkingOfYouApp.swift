@@ -15,6 +15,7 @@ struct ThinkingOfYouApp: App {
         WindowGroup {
             RootView()
                 .environment(env)
+                .preferredColorScheme(.dark)
                 .task {
                     let environment = env
                     appDelegate.nudgeHandler = { route in environment.handleNudge(route) }

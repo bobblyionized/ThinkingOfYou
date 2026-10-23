@@ -1,8 +1,9 @@
 //  Theme.swift
 //  ThinkingOfYou/UI — design tokens: color, type, spacing, shape, motion.
 //
-//  Direction: "blush stationery". Pages are a faintly pink writing paper,
-//  text is a plum-brown ink, the accent is the app's rose. Headings use the
+//  Direction: "night letter". The app is always dark (the root forces the
+//  dark color scheme): charcoal pages, warm off-white ink, and a deep pink
+//  accent, matching the dark-gray-and-pink heart icon. Headings use the
 //  serif system face (New York) like the opening line of a letter; numbers
 //  use SF Rounded with tabular digits so countdowns never jitter.
 
@@ -12,30 +13,30 @@ import UIKit
 // MARK: - Color
 
 enum Theme {
-    /// Page background: blush writing paper / plum night.
-    static let paper = Color(light: 0xFBF4F2, dark: 0x1A1215)
+    /// Page background: near-black charcoal.
+    static let paper = Color(hex: 0x121012)
     /// Raised surfaces: cards, rows, the top bar.
-    static let card = Color(light: 0xFFFBFA, dark: 0x261B1F)
-    /// Soft rose tint for fills behind icons and avatars.
-    static let blush = Color(light: 0xF8E0E6, dark: 0x3A2329)
+    static let card = Color(hex: 0x1D1A1D)
+    /// Deep pink tint for fills behind icons and avatars.
+    static let blush = Color(hex: 0x3A1626)
     /// Main text.
-    static let ink = Color(light: 0x33222A, dark: 0xF5E8EB)
+    static let ink = Color(hex: 0xF1E4E9)
     /// Secondary text.
-    static let inkSoft = Color(light: 0x7A6870, dark: 0xB9A2A9)
-    /// Brand rose (matches AccentColor). Use for shapes, not small text.
-    static let rose = Color(light: 0xF2668B, dark: 0xFF809E)
-    /// Rose that is legible as text on `paper` / `card`.
-    static let wine = Color(light: 0xB2345A, dark: 0xFF9DB4)
-    /// Rose fill for primary buttons (paired with `onRose`).
-    static let roseFill = Color(light: 0xD9476F, dark: 0xFF809E)
+    static let inkSoft = Color(hex: 0xA3929A)
+    /// Brand deep pink (matches AccentColor). Use for shapes, not small text.
+    static let rose = Color(hex: 0xC2185B)
+    /// Deep pink that is legible as text on `paper` / `card`.
+    static let wine = Color(hex: 0xE04E86)
+    /// Deep pink fill for primary buttons (paired with `onRose`).
+    static let roseFill = Color(hex: 0xAD1457)
     /// Text and icons on `roseFill`.
-    static let onRose = Color(light: 0xFFFFFF, dark: 0x3B0F1D)
+    static let onRose = Color(hex: 0xFFFFFF)
     /// Hairlines and outlines.
-    static let hairline = Color(light: 0xEBDADD, dark: 0x3D2C32)
-    /// Background of the dark toast capsule.
-    static let toastFill = Color(light: 0x33222A, dark: 0xF5E8EB)
+    static let hairline = Color(hex: 0x2E272B)
+    /// Background of the toast capsule.
+    static let toastFill = Color(hex: 0x2A2328)
     /// Text on `toastFill`.
-    static let onToast = Color(light: 0xFBF4F2, dark: 0x1A1215)
+    static let onToast = Color(hex: 0xF1E4E9)
 }
 
 // MARK: - Spacing / shape
@@ -101,6 +102,11 @@ enum Motion {
 // MARK: - Helpers
 
 extension Color {
+    /// A fixed color. Hex is 0xRRGGBB.
+    init(hex: UInt32) {
+        self.init(uiColor: UIColor(hex: hex))
+    }
+
     /// A color that follows the light/dark appearance. Hex is 0xRRGGBB.
     init(light: UInt32, dark: UInt32) {
         self.init(uiColor: UIColor { traits in

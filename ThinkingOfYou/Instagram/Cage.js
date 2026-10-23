@@ -306,14 +306,21 @@
     return !!(dialog && !dialog.querySelector('video'));
   }
 
+  // DMs, the inbox and every other page scroll freely: the scroll blockers
+  // below are only attached while a locked single reel is open, and are
+  // removed the moment the route leaves it. (A non-passive touchmove on the
+  // window would otherwise make the browser wait on JS for every DM scroll.)
+  const inDirect = () => /^\/direct(\/|$)/.test(location.pathname);
+  const reelScrollLocked = () => reelLocked() && !inDirect();
+
   let touchStart = null;
-  addEventListener('touchstart', (e) => {
+  function onTouchStart(e) {
     const t = e.touches && e.touches[0];
     touchStart = t ? { x: t.clientX, y: t.clientY } : null;
-  }, { capture: true, passive: true });
+  }
 
-  addEventListener('touchmove', (e) => {
-    if (!reelLocked() || exempt(e.target)) return;
+  function onTouchMove(e) {
+    if (!reelScrollLocked() || exempt(e.target)) return;
     const t = e.touches && e.touches[0];
     if (!t || !touchStart || (e.touches && e.touches.length > 1)) return;
     const dx = Math.abs(t.clientX - touchStart.x);
@@ -322,24 +329,45 @@
     if (dx > dy) return;
     if (e.cancelable) e.preventDefault();
     e.stopPropagation();
-  }, { capture: true, passive: false });
+  }
 
-  addEventListener('wheel', (e) => {
-    if (!reelLocked() || exempt(e.target)) return;
+  function onWheel(e) {
+    if (!reelScrollLocked() || exempt(e.target)) return;
     if (Math.abs(e.deltaY) >= Math.abs(e.deltaX) && e.cancelable) {
       e.preventDefault();
       e.stopPropagation();
     }
-  }, { capture: true, passive: false });
+  }
 
   const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'End', 'Home', ' ', 'Spacebar', 'j', 'k']);
-  addEventListener('keydown', (e) => {
-    if (!reelLocked() || isEditable(e.target)) return;
+  function onKeyDown(e) {
+    if (!reelScrollLocked() || isEditable(e.target)) return;
     if (SCROLL_KEYS.has(e.key)) {
       e.preventDefault();
       e.stopImmediatePropagation();
     }
-  }, true);
+  }
+
+  let scrollBlockersOn = false;
+  function syncScrollBlockers() {
+    const want = reelScrollLocked();
+    if (want === scrollBlockersOn) return;
+    scrollBlockersOn = want;
+    const touchOpts = { capture: true, passive: true };
+    const blockOpts = { capture: true, passive: false };
+    if (want) {
+      addEventListener('touchstart', onTouchStart, touchOpts);
+      addEventListener('touchmove', onTouchMove, blockOpts);
+      addEventListener('wheel', onWheel, blockOpts);
+      addEventListener('keydown', onKeyDown, true);
+    } else {
+      removeEventListener('touchstart', onTouchStart, touchOpts);
+      removeEventListener('touchmove', onTouchMove, blockOpts);
+      removeEventListener('wheel', onWheel, blockOpts);
+      removeEventListener('keydown', onKeyDown, true);
+      touchStart = null;
+    }
+  }
 
   // Hide every reel container after the first one, pausing its video.
   function hideNextReels() {
@@ -497,10 +525,11 @@
     if (root) {
       root.classList.toggle('toy-locked', locked());
       root.classList.toggle('toy-inbox', atInbox());
-      root.classList.toggle('toy-reel', onReel());
+      root.classList.toggle('toy-reel', onReel() && !inDirect());
     }
     renderOwnStyle();
     hideNextReels();
+    syncScrollBlockers();
   }
 
   window.__toySetState = function (s) {
