@@ -112,7 +112,7 @@ edge-only switch.
     private(set) var isUnlocked: Bool               // a session is running → feeds & reel scrolling open
     private(set) var isTicking: Bool                // timer actually spending (unlocked && foreground && Instagram mode)
     private(set) var unusedDaysEarned: Int          // lifetime unused days that paid the vault
-    private(set) var earnedNotice: String?          // "+20 min banked for days you skipped scrolling" (one-shot)
+    private(set) var earnedNotice: String?          // "+20 min banked for days you skipped scrolling" (one-shot; also set on a cold launch)
     let dailyAllowance: TimeInterval                // 600
 
     // derived
@@ -131,6 +131,7 @@ edge-only switch.
     func stop()                               // end session now (re-locks; web view goes to inbox)
     func dismissEarnedNotice()
     func refresh()                            // Core calls this; UI doesn't need to
+    nonisolated static func earnedNoticeText(_ earned: TimeInterval) -> String
 }
 ```
 
@@ -173,14 +174,14 @@ looks right). The first appearance creates the web view and loads
     private(set) var isUnlocked: Bool          // mirrors budget.isUnlocked
     private(set) var detectedUsername: String? // found automatically
     private(set) var manualUsername: String?   // set in Settings; wins
+    private(set) var hasWebView: Bool          // tracked: flips true once the web view exists
 
     // derived
     var ownUsername: String?        // manual ?? detected (lowercase, no "@")
     var isUsingManualUsername: Bool
     var currentPath: String
     var isAtInbox: Bool
-    var isOnReel: Bool              // single /reel/<code>/ page
-    var hasWebView: Bool
+    var isOnReel: Bool              // a single reel page (/reel/<code>/, /<user>/reel/<code>/, /reels/<code>/)
 
     // actions
     func reload()
@@ -206,9 +207,9 @@ the budget pill, plus Inbox, Notifications and Back buttons and an unread
 badge. Don't recreate Instagram's own tab bar, because the cage hides
 Home, Explore, Reels, Create and your own profile while locked.
 
-What's caged while locked: the feed `/`, `/reels/`, bare `/reel/`,
-`/explore/...`, `/<user>/reels|tagged|saved/`, and your own profile
-`/<ownUsername>/...`. Within a single reel, scrolling to the next reel is
+What's caged while locked: the feed `/`, `/reels/`, bare `/reel/` and
+`/<user>/reel/`, `/explore/...`, `/<user>/reels|tagged|saved/`, and your
+own profile `/<ownUsername>/...`. Within a single reel, scrolling to the next reel is
 also blocked. What's always open: DMs, notes, stories, other profiles,
 notifications, a single post and a single reel.
 
@@ -481,4 +482,28 @@ automatically.
 
 ## Contract changes
 
-- *(none yet. Append entries as `YYYY-MM-DD: what changed (who)`.)*
+- 2026-10-22: `NudgesViewModel.scheduleText(for:calendar:)` and
+  `NudgesViewModel.suggestedDate(after:calendar:)` are now `nonisolated static`
+  (pure helpers, callable from any context). Call sites are unchanged. (Core)
+- 2026-10-22: Reviewer pass 1 (Core).
+  - `BudgetViewModel.earnedNotice` is now also set on a cold launch that paid
+    the vault. The wording comes from the new
+    `nonisolated static func earnedNoticeText(_:)`. The `init` calendar
+    default is now `.autoupdatingCurrent`, and the midnight refresh
+    reschedules on time-zone and significant-time changes.
+  - `InstagramViewModel.hasWebView` is now a tracked `private(set) var` (it
+    was a computed property that never updated views). It's read-only as
+    before.
+  - `InstagramViewModel.isOnReel` now also covers `/<user>/reel/<code>/` and
+    `/reels/<code>/`.
+  - `CageRules`: `reelCode(inPath:)` also matches `/<user>/reel/<code>/`.
+    Bare `/<user>/reel/` is blocked as `.reels`. `blocksNextReel` accepts
+    any reel form on either side. Two new helpers: `isProfileSegment(_:)`
+    and `isSameReel(_:_:)`. The same reel in another form is always
+    allowed, so it can't loop.
+  - `PeopleViewModel.loadIfNeeded()` and `reload()` now wait for a contacts
+    fetch that is already running instead of returning early.
+  - Cage.js: these changes mirror the Swift rules. History-hook bounces
+    force an inbox reload even when the URL already is the inbox. A
+    one-shot guard stops the `/reels/<code>/` to `/reel/<code>/` redirect
+    from looping.

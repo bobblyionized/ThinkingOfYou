@@ -5,6 +5,7 @@
 
 import Foundation
 import Observation
+import UIKit
 
 @Observable
 @MainActor
@@ -69,15 +70,18 @@ final class BudgetViewModel {
     @ObservationIgnored private var timer: Timer? = nil
     @ObservationIgnored private var midnightTimer: Timer? = nil
     @ObservationIgnored private var lastTick: Date? = nil
+    @ObservationIgnored private var timeObservers: [NSObjectProtocol] = []
 
+    /// `calendar` defaults to `.autoupdatingCurrent`, so midnight follows the
+    /// device's time zone as it changes.
     init(defaults: UserDefaults = .standard,
-         calendar: Calendar = .current,
+         calendar: Calendar = .autoupdatingCurrent,
          now: @escaping () -> Date = { Date() }) {
         let store = BudgetStore(defaults: defaults)
         var engine = ScrollBudgetEngine(state: store.load() ?? BudgetState(), calendar: calendar)
         // A fresh launch always starts locked.
         engine.endSession()
-        engine.evaluate(now: now())
+        let earned = engine.evaluate(now: now())
         store.save(engine.state)
 
         self.store = store
@@ -87,6 +91,16 @@ final class BudgetViewModel {
         self.dailyRemaining = engine.dailyRemaining
         self.vault = engine.vault
         self.unusedDaysEarned = engine.state.unusedDaysEarned
+        // Cold launch after skipped days: show the payout too.
+        if earned > 0 {
+            self.earnedNotice = Self.earnedNoticeText(earned)
+        }
+        observeTimeChanges()
+    }
+
+    /// Wording shared by launch and `refresh()`.
+    nonisolated static func earnedNoticeText(_ earned: TimeInterval) -> String {
+        "+\(BudgetFormat.short(earned)) banked for days you skipped scrolling"
     }
 
     // MARK: Actions
@@ -109,7 +123,7 @@ final class BudgetViewModel {
     func refresh() {
         let earned = engine.evaluate(now: now())
         if earned > 0 {
-            earnedNotice = "+\(BudgetFormat.short(earned)) banked for days you skipped scrolling"
+            earnedNotice = Self.earnedNoticeText(earned)
         }
         persistAndPublish()
     }
@@ -190,6 +204,25 @@ final class BudgetViewModel {
         guard elapsed > 0 else { return }
         engine.tick(seconds: elapsed, now: current)
         persistAndPublish()
+    }
+
+    /// Time zone or clock changes move "midnight": drop the pending midnight
+    /// timer and re-evaluate (which reschedules it).
+    private func observeTimeChanges() {
+        let names: [Notification.Name] = [.NSSystemTimeZoneDidChange, UIApplication.significantTimeChangeNotification]
+        timeObservers = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.timeDidChange()
+                }
+            }
+        }
+    }
+
+    private func timeDidChange() {
+        midnightTimer?.invalidate()
+        midnightTimer = nil
+        refresh()
     }
 
     /// Refreshes the numbers right after local midnight even if the app just

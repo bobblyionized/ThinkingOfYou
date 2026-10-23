@@ -33,6 +33,9 @@ final class InstagramViewModel {
     private(set) var detectedUsername: String? = nil
     /// Username typed in Settings (persisted). Wins over `detectedUsername`.
     private(set) var manualUsername: String? = nil
+    /// True once the web view has been created (first time the container
+    /// shows). Tracked, so views update when it flips.
+    private(set) var hasWebView = false
 
     // MARK: Derived
 
@@ -45,9 +48,7 @@ final class InstagramViewModel {
         let parts = CageRules.segments(of: currentPath)
         return parts.count == 2 && parts[0] == "direct" && parts[1] == "inbox"
     }
-    var isOnReel: Bool { CageRules.reelCode(inPath: currentPath) != nil }
-    /// True once the web view has been created (first time the container shows).
-    var hasWebView: Bool { coordinator != nil }
+    var isOnReel: Bool { CageRules.anyReelCode(inPath: currentPath) != nil }
 
     // MARK: Internals
 
@@ -66,6 +67,10 @@ final class InstagramViewModel {
         if let coordinator { return coordinator }
         let created = InstagramWebCoordinator(model: self)
         coordinator = created
+        // Usually read from makeUIView: don't mutate tracked state mid-update.
+        Task { @MainActor [weak self] in
+            self?.hasWebView = true
+        }
         return created
     }
 

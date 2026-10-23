@@ -183,7 +183,7 @@ final class InstagramWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegat
     /// view is frozen on a single-reel page while locked.
     private func updateNativeScrollLock() {
         let path = webView.url.map(CageRules.pathWithSlash) ?? "/"
-        let freeze = !isUnlocked && CageRules.reelCode(inPath: path) != nil
+        let freeze = !isUnlocked && CageRules.anyReelCode(inPath: path) != nil
         if webView.scrollView.isScrollEnabled == freeze {
             webView.scrollView.isScrollEnabled = !freeze
         }

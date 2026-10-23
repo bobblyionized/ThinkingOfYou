@@ -87,9 +87,15 @@
     return String(path || '/').split(/[?#]/)[0].split('/').filter(Boolean);
   }
 
+  // A first segment that can be a username (not an Instagram route).
+  const isProfileSegment = (x) => /^[\w.]+$/.test(x) && !RESERVED.has(x.toLowerCase());
+
+  // Single-reel code: /reel/<code>/ or the user-scoped /<user>/reel/<code>/.
   function reelCode(path) {
     const s = segments(path);
-    return s.length >= 2 && s[0].toLowerCase() === 'reel' ? s[1] : null;
+    if (s.length >= 2 && s[0].toLowerCase() === 'reel') return s[1];
+    if (s.length >= 3 && s[1].toLowerCase() === 'reel' && isProfileSegment(s[0])) return s[2];
+    return null;
   }
 
   const isShortcode = (x) => /^[A-Za-z0-9_-]{8,}$/.test(x);
@@ -114,6 +120,8 @@
     if (s.length === 0) return 'The feed';
     if (s[0] === 'reels' || (s[0] === 'reel' && s.length === 1)) return 'Reels';
     if (s[0] === 'explore') return 'Explore';
+    // Bare /<user>/reel/ (no code) is a doorway into Reels.
+    if (s.length === 2 && s[1] === 'reel' && isProfileSegment(s[0])) return 'Reels';
     if (s.length >= 2 && /^[\w.]+$/.test(s[0]) && PROFILE_TABS.includes(s[1])) return 'That profile tab';
     const me = own();
     if (me && s[0] === me) return 'Your own profile';
@@ -129,7 +137,7 @@
   const locked = () => !state.unlocked;
   const own = () => state.ownUsername || detected;
   const atInbox = () => /^\/direct\/inbox\/?$/.test(location.pathname);
-  const onReel = () => !!reelCode(location.pathname);
+  const onReel = () => !!anyReelCode(location.pathname);
   const reelLocked = () => locked() && onReel();
 
   function post(msg) {
@@ -149,9 +157,11 @@
     if (!locked()) return null;
     const p = pathOf(href);
     if (p == null) return null;
-    const from = reelCode(location.pathname);
+    const from = anyReelCode(location.pathname);
     const to = anyReelCode(p);
     if (from && to && from !== to) return { reason: 'The next reel', bounce: false };
+    // Same reel in another form (e.g. /reel/A/ -> /reels/A/): never loop.
+    if (from && to && from === to) return null;
     const single = reelRedirect(p);
     if (single) return { redirect: single };
     const hit = blockedRoute(p);
@@ -159,23 +169,37 @@
     return null;
   }
 
-  function bounce(reason) {
+  // `force`: reload the inbox even when the URL already is the inbox. The
+  // history hooks pass it, because a swallowed pushState('/') from the
+  // inbox may already have the router rendering the feed under that URL.
+  function bounce(reason, force) {
     post({ type: 'blocked', reason: reason, path: location.pathname, bounce: true });
-    if (atInbox()) return;
+    if (atInbox() && !force) return;
     location.replace(INBOX);
   }
 
-  function refuse(v) {
+  // Rewrites /reels/<code>/ to /reel/<code>/ once. If Instagram sends us
+  // straight back (same code), stay put: the reel lock still applies there.
+  function redirectToSingle(single) {
+    let recent = null;
+    try { recent = sessionStorage.getItem('toyReelRedirect'); } catch (e) { /* storage blocked */ }
+    if (recent === single) return false;
+    try { sessionStorage.setItem('toyReelRedirect', single); } catch (e) { /* storage blocked */ }
+    location.replace(single);
+    return true;
+  }
+
+  function refuse(v, force) {
     if (v.redirect) { location.assign(v.redirect); return; }
-    if (v.bounce) { bounce(v.reason); return; }
+    if (v.bounce) { bounce(v.reason, force); return; }
     post({ type: 'blocked', reason: v.reason, path: location.pathname, bounce: false });
   }
 
   // ---- layer 1: never paint a blocked page -----------------------------------
   if (locked()) {
     const single = reelRedirect(location.pathname);
-    if (single) { location.replace(single); return; }
-    const hit = blockedRoute(location.pathname);
+    if (single && redirectToSingle(single)) return;
+    const hit = single ? null : blockedRoute(location.pathname);
     if (hit) { bounce(hit); return; }
   }
 
@@ -198,7 +222,7 @@
     history[name] = function (data, title, url) {
       if (locked() && url != null) {
         const v = verdict(String(url));
-        if (v) { refuse(v); return undefined; }
+        if (v) { refuse(v, true); return undefined; }
       }
       const result = original.apply(this, arguments);
       onRoute();
@@ -213,12 +237,14 @@
     if (location.href === lastHref) return;
     const previous = lastPath;
     if (locked()) {
-      const from = reelCode(previous);
+      const from = anyReelCode(previous);
       const to = anyReelCode(location.pathname);
-      if (!(from && to && from !== to)) {
+      if (from && to && from === to) {
+        // Same reel in another form: nothing to block or redirect.
+      } else if (!(from && to && from !== to)) {
         const single = reelRedirect(location.pathname);
-        if (single) { location.replace(single); return; }
-        const hit = blockedRoute(location.pathname);
+        if (single && redirectToSingle(single)) return;
+        const hit = single ? null : blockedRoute(location.pathname);
         if (hit) { bounce(hit); return; }
       } else {
         // Slipped onto another reel anyway: go back to the one that was open.
@@ -492,6 +518,9 @@
   function onRoute() {
     lastHref = location.href;
     lastPath = location.pathname;
+    if (!onReel()) {
+      try { sessionStorage.removeItem('toyReelRedirect'); } catch (e) { /* storage blocked */ }
+    }
     applyState();
     post({ type: 'route', path: location.pathname, reel: onReel() });
   }

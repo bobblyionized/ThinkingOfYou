@@ -34,7 +34,7 @@ struct ScrollBudgetEngine: Sendable {
     let vaultReward: TimeInterval
 
     init(state: BudgetState = BudgetState(),
-         calendar: Calendar = .current,
+         calendar: Calendar = .autoupdatingCurrent,
          dailyAllowance: TimeInterval = ScrollBudgetEngine.defaultDailyAllowance,
          vaultReward: TimeInterval = ScrollBudgetEngine.defaultVaultReward) {
         self.state = state

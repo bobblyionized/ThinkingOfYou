@@ -115,7 +115,7 @@ final class NudgesViewModel {
     // MARK: Formatting
 
     /// "Tomorrow, 7:00 PM" / "Every day, 9:00 AM" / "Every Monday, 6:30 PM".
-    static func scheduleText(for nudge: Nudge, calendar: Calendar = .current) -> String {
+    nonisolated static func scheduleText(for nudge: Nudge, calendar: Calendar = .current) -> String {
         guard let date = nudge.nextFireDate else { return nudge.repeats.title }
         let time = date.formatted(date: .omitted, time: .shortened)
         switch nudge.repeats {
@@ -132,7 +132,7 @@ final class NudgesViewModel {
     }
 
     /// The next whole hour at least 30 minutes away.
-    static func suggestedDate(after date: Date, calendar: Calendar = .current) -> Date {
+    nonisolated static func suggestedDate(after date: Date, calendar: Calendar = .current) -> Date {
         let later = date.addingTimeInterval(30 * 60)
         let hourStart = calendar.dateInterval(of: .hour, for: later)?.start ?? later
         return calendar.date(byAdding: .hour, value: 1, to: hourStart) ?? later

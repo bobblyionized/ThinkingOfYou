@@ -335,6 +335,24 @@ final class BudgetViewModelTests: XCTestCase {
         model.stop()
     }
 
+    func testColdLaunchAfterSkippedDaysShowsEarnedNotice() {
+        let calendar = Calendar(identifier: .gregorian)
+        let today = DayStamp(clock, calendar: calendar)
+        let threeDaysBack = today.adding(days: -3, calendar: calendar)
+        // Last opened 3 days ago, unused: days -2 and -1 are completed and unpaid.
+        BudgetStore(defaults: testDefaults()).save(BudgetState(currentDay: threeDaysBack,
+                                                               lastEvaluatedDay: threeDaysBack,
+                                                               installDay: threeDaysBack))
+        let model = makeModel()
+        XCTAssertNotNil(model.earnedNotice)
+        XCTAssertEqual(model.earnedNotice, BudgetViewModel.earnedNoticeText(1200))
+        XCTAssertEqual(model.vault, 1200, accuracy: 0.0001)
+        XCTAssertEqual(model.unusedDaysEarned, 2)
+
+        // A second launch the same day has nothing new to announce.
+        XCTAssertNil(makeModel().earnedNotice)
+    }
+
     func testVaultEarnedNoticeAfterRollover() {
         let model = makeModel()
         clock = clock.addingTimeInterval(3 * 86_400)

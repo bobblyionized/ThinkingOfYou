@@ -51,6 +51,8 @@ final class PeopleViewModel {
     private let defaults: UserDefaults
     private var peopleByID: [String: Person] = [:]
     @ObservationIgnored private var changeObserver: NSObjectProtocol? = nil
+    /// The contacts fetch in flight, shared by every caller that needs it.
+    @ObservationIgnored private var loadTask: Task<Void, Never>? = nil
     private let isPreview: Bool
 
     init(defaults: UserDefaults = .standard, preloaded: [Person]? = nil) {
@@ -90,13 +92,19 @@ final class PeopleViewModel {
         }
     }
 
-    /// Loads contacts once if possible (used before opening a nudge).
+    /// Loads contacts once if possible (used before opening a nudge). If a
+    /// load is already running, waits for it instead of returning early.
     func loadIfNeeded() async {
+        if let loadTask {
+            await loadTask.value
+            return
+        }
         refreshAccess()
-        guard access.canRead, !hasLoaded, !isLoading else { return }
+        guard access.canRead, !hasLoaded else { return }
         await reload()
     }
 
+    /// Fetches contacts. Concurrent calls join the fetch already in flight.
     func reload() async {
         refreshAccess()
         guard !isPreview else { return }
@@ -105,7 +113,20 @@ final class PeopleViewModel {
             peopleByID = [:]
             return
         }
-        guard !isLoading else { return }
+        if let loadTask {
+            await loadTask.value
+            return
+        }
+        let task = Task<Void, Never> { @MainActor [weak self] in
+            guard let self else { return }
+            await self.fetchContacts()
+        }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func fetchContacts() async {
         isLoading = true
         defer { isLoading = false }
         do {

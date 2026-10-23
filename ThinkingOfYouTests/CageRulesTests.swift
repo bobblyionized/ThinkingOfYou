@@ -101,6 +101,46 @@ final class CageRulesTests: XCTestCase {
         XCTAssertFalse(CageRules.Block.nextReel.bouncesToInbox)
     }
 
+    func testUserScopedReelsAreSingleReels() {
+        XCTAssertEqual(CageRules.reelCode(inPath: "/ada/reel/CxYz123AbCd/"), "CxYz123AbCd")
+        XCTAssertEqual(CageRules.reelCode(inPath: "/Ada.L/reel/CxYz123AbCd/?igsh=1"), "CxYz123AbCd")
+        XCTAssertEqual(CageRules.anyReelCode(inPath: "/ada/reel/CxYz123AbCd/"), "CxYz123AbCd")
+        XCTAssertNil(CageRules.reelCode(inPath: "/p/reel/CxYz123AbCd/"))        // reserved first segment
+        XCTAssertNil(CageRules.reelCode(inPath: "/explore/reel/CxYz123AbCd/"))
+        XCTAssertNil(CageRules.reelCode(inPath: "/ada/reel/"))
+
+        // The next-reel lock covers the user-scoped form.
+        XCTAssertTrue(rules.blocksNextReel(fromPath: "/ada/reel/AAAAAAAAAAA/", toPath: "/ada/reel/BBBBBBBBBBB/"))
+        XCTAssertTrue(rules.blocksNextReel(fromPath: "/ada/reel/AAAAAAAAAAA/", toPath: "/reel/BBBBBBBBBBB/"))
+        XCTAssertTrue(rules.blocksNextReel(fromPath: "/reel/AAAAAAAAAAA/", toPath: "/ada/reel/BBBBBBBBBBB/"))
+        XCTAssertFalse(rules.blocksNextReel(fromPath: "/ada/reel/AAAAAAAAAAA/", toPath: "/ada/reel/AAAAAAAAAAA/"))
+        XCTAssertEqual(rules.decide(url: ig("/ada/reel/BBBBBBBBBBB/"), currentURL: ig("/ada/reel/AAAAAAAAAAA/"),
+                                    isMainFrame: true, unlocked: false), .block(.nextReel))
+
+        // A single user-scoped reel is allowed; the bare doorway is Reels.
+        XCTAssertNil(rules.blockedRoute(forPath: "/ada/reel/AAAAAAAAAAA/"))
+        XCTAssertEqual(rules.blockedRoute(forPath: "/ada/reel/"), .reels)
+        XCTAssertEqual(rules.blockedRoute(forPath: "/ada/reel"), .reels)
+        XCTAssertNil(rules.blockedRoute(forPath: "/p/reel/"))
+        // Own user-scoped reels stay blocked as your own profile.
+        XCTAssertEqual(mine.blockedRoute(forPath: "/me.myself/reel/"), .reels)
+        XCTAssertEqual(mine.blockedRoute(forPath: "/me.myself/reel/AAAAAAAAAAA/"), .ownProfile)
+    }
+
+    func testSameReelInAnotherFormNeverLoops() {
+        XCTAssertTrue(CageRules.isSameReel("/reel/AAAAAAAAAAA/", "/reels/AAAAAAAAAAA/"))
+        XCTAssertFalse(CageRules.isSameReel("/reel/AAAAAAAAAAA/", "/reels/BBBBBBBBBBB/"))
+        XCTAssertFalse(CageRules.isSameReel(nil, "/reels/AAAAAAAAAAA/"))
+        // Rewriting /reel/A/ to /reels/A/ is allowed, not redirected back.
+        XCTAssertEqual(rules.decide(url: ig("/reels/AAAAAAAAAAA/"), currentURL: ig("/reel/AAAAAAAAAAA/"),
+                                    isMainFrame: true, unlocked: false), .allow)
+        // ...and the other direction too.
+        XCTAssertEqual(rules.decide(url: ig("/reel/AAAAAAAAAAA/"), currentURL: ig("/reels/AAAAAAAAAAA/"),
+                                    isMainFrame: true, unlocked: false), .allow)
+        // But moving on from a /reels/ page to another code is still the next reel.
+        XCTAssertTrue(rules.blocksNextReel(fromPath: "/reels/AAAAAAAAAAA/", toPath: "/reel/BBBBBBBBBBB/"))
+    }
+
     func testReelCodes() {
         XCTAssertEqual(CageRules.reelCode(inPath: "/reel/CxYz123AbCd/"), "CxYz123AbCd")
         XCTAssertNil(CageRules.reelCode(inPath: "/reels/CxYz123AbCd/"))

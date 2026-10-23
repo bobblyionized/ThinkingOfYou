@@ -78,11 +78,18 @@ struct CageRules: Equatable, Sendable {
         return noFragment.split(separator: "/").map(String.init)
     }
 
-    /// The code of a single-reel path (`/reel/<code>/`), case preserved.
+    /// The code of a single-reel path, case preserved: `/reel/<code>/` or the
+    /// user-scoped form `/<user>/reel/<code>/`.
     static func reelCode(inPath path: String) -> String? {
         let parts = segments(of: path)
-        guard parts.count >= 2, parts[0].lowercased() == "reel" else { return nil }
-        return parts[1]
+        if parts.count >= 2, parts[0].lowercased() == "reel" { return parts[1] }
+        if parts.count >= 3, parts[1].lowercased() == "reel", isProfileSegment(parts[0]) { return parts[2] }
+        return nil
+    }
+
+    /// A first segment that can be a username (not an Instagram route).
+    static func isProfileSegment(_ segment: String) -> Bool {
+        isUsernameLike(segment) && !reservedTopLevel.contains(segment.lowercased())
     }
 
     /// True for something shaped like a post/reel shortcode (not "audio" etc.).
@@ -121,18 +128,29 @@ struct CageRules: Equatable, Sendable {
         guard let first = parts.first else { return .feed }
         if first == "reels" || (first == "reel" && parts.count == 1) { return .reels }
         if first == "explore" { return .explore }
+        // Bare `/<user>/reel/` (no code) is a doorway into Reels.
+        if parts.count == 2, parts[1] == "reel", Self.isProfileSegment(first) { return .reels }
         if parts.count >= 2, Self.isUsernameLike(first), Self.profileTabs.contains(parts[1]) { return .profileTab }
         if let own = ownUsername, first == own { return .ownProfile }
         return nil
     }
 
-    /// True when moving from one single reel to a different one (scrolling to
-    /// the next reel) while locked.
+    /// True when moving from one reel to a different one (scrolling to the
+    /// next reel) while locked. Either side may be any reel form.
     func blocksNextReel(fromPath current: String?, toPath next: String) -> Bool {
         guard let current,
-              let from = Self.reelCode(inPath: current),
+              let from = Self.anyReelCode(inPath: current),
               let to = Self.anyReelCode(inPath: next) else { return false }
         return from != to
+    }
+
+    /// True when both paths show the same reel code (e.g. Instagram rewriting
+    /// `/reel/A/` to `/reels/A/`): never blocked or redirected, so it can't loop.
+    static func isSameReel(_ current: String?, _ next: String) -> Bool {
+        guard let current,
+              let from = anyReelCode(inPath: current),
+              let to = anyReelCode(inPath: next) else { return false }
+        return from == to
     }
 
     /// Full rule for a locked path, including the next-reel rule. (A
@@ -208,6 +226,7 @@ struct CageRules: Equatable, Sendable {
             let path = Self.pathWithSlash(url)
             let currentPath = Self.isInstagramHost(currentURL?.host) ? currentURL?.path : nil
             if blocksNextReel(fromPath: currentPath, toPath: path) { return .block(.nextReel) }
+            if Self.isSameReel(currentPath, path) { return .allow }
             if let single = Self.singleReelRedirect(forPath: path),
                let target = URL(string: "https://www.instagram.com" + single) {
                 return .redirect(target)
