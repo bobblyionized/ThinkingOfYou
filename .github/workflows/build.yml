@@ -1,0 +1,168 @@
+name: Build ThinkingOfYou.ipa
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Pinned image (macos-latest moves). macOS 26 images ship Xcode 26.x.
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Newest stable Xcode 26+ on the image (no betas / release candidates).
+          XCODE=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | grep -viE 'beta|rc' | sort -V | tail -1 || true)
+          if [ -z "$XCODE" ]; then
+            echo "::error::No Xcode 26+ found on this runner."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          echo "Selected: $(xcode-select -p)"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          swift --version
+
+      - name: Install XcodeGen and ldid
+        run: brew install xcodegen ldid
+
+      - name: Generate app icon
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --break-system-packages pillow \
+            || python3 -m pip install --quiet --user --break-system-packages pillow \
+            || python3 -m pip install --quiet pillow
+          python3 scripts/make_icon.py ThinkingOfYou/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+          sips -g pixelWidth -g pixelHeight -g hasAlpha ThinkingOfYou/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          UDID=$(python3 scripts/pick_simulator.py || true)
+          echo "Using simulator $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests (simulator)
+        run: |
+          mkdir -p build
+          DEST="id=${{ steps.sim.outputs.udid }}"
+          if [ -z "${{ steps.sim.outputs.udid }}" ]; then DEST="platform=iOS Simulator,OS=latest,name=iPhone 17"; fi
+          if ! xcodebuild test \
+              -project ThinkingOfYou.xcodeproj \
+              -scheme ThinkingOfYou \
+              -destination "$DEST" \
+              -resultBundlePath build/TestResults.xcresult \
+              CODE_SIGNING_ALLOWED=NO \
+              > build/test.log 2>&1; then
+            grep -E "error:|failed|FAILED" build/test.log | head -80 || true
+            tail -60 build/test.log
+            exit 1
+          fi
+          grep -E "Executed|\*\* TEST" build/test.log | tail -5
+
+      - name: Archive (unsigned, device)
+        run: |
+          mkdir -p build
+          if ! xcodebuild archive \
+              -project ThinkingOfYou.xcodeproj \
+              -scheme ThinkingOfYou \
+              -configuration Release \
+              -destination "generic/platform=iOS" \
+              -archivePath build/ThinkingOfYou.xcarchive \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              > build/archive.log 2>&1; then
+            grep -E "error:" build/archive.log | head -80 || true
+            tail -60 build/archive.log
+            exit 1
+          fi
+          grep -E "\*\* ARCHIVE" build/archive.log | tail -2
+
+      - name: Embed entitlements with ldid and package IPA
+        run: |
+          set -euo pipefail
+          APP="build/ThinkingOfYou.xcarchive/Products/Applications/ThinkingOfYou.app"
+          test -d "$APP"
+          # No extensions and no special entitlements: the file is an empty dict,
+          # but ldid -S still gives the binary a well-formed ad-hoc signature.
+          ldid -SThinkingOfYou/App/ThinkingOfYou.entitlements "$APP/ThinkingOfYou"
+          rm -rf build/ipa && mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+          (cd build/ipa && zip -qry ../../ThinkingOfYou.ipa Payload)
+          ls -lh ThinkingOfYou.ipa
+
+      - name: Verify IPA contents
+        run: |
+          set -euo pipefail
+          rm -rf build/verify && mkdir -p build/verify
+          unzip -q ThinkingOfYou.ipa -d build/verify
+          APP=build/verify/Payload/ThinkingOfYou.app
+          PLIST="$APP/Info.plist"
+          test -f "$APP/ThinkingOfYou" || { echo "missing executable"; exit 1; }
+
+          NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")
+          test "$NAME" = "Thinking Of You" || { echo "CFBundleDisplayName is '$NAME'"; exit 1; }
+          BID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")
+          test "$BID" = "com.thinkingofyou.app" || { echo "bundle id is '$BID'"; exit 1; }
+
+          # App icon: compiled into Assets.car and referenced from Info.plist.
+          test -f "$APP/Assets.car" || { echo "missing Assets.car"; exit 1; }
+          ICON=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$PLIST" 2>/dev/null || true)
+          test "$ICON" = "AppIcon" || { echo "CFBundleIconName is '$ICON'"; exit 1; }
+          ls "$APP"/AppIcon*.png >/dev/null 2>&1 && echo "icon pngs: $(ls "$APP"/AppIcon*.png | xargs -n1 basename | tr '\n' ' ')" \
+            || echo "note: no loose AppIcon*.png (icon lives only in Assets.car)"
+
+          SCHEMES=$(plutil -extract LSApplicationQueriesSchemes json -o - "$PLIST")
+          echo "LSApplicationQueriesSchemes: $SCHEMES"
+          for s in sms tel facetime facetime-audio imessage instagram; do
+            echo "$SCHEMES" | grep -q "\"$s\"" || { echo "query scheme '$s' missing"; exit 1; }
+          done
+
+          /usr/libexec/PlistBuddy -c 'Print :NSContactsUsageDescription' "$PLIST" >/dev/null \
+            || { echo "NSContactsUsageDescription missing"; exit 1; }
+          test -f "$APP/Cage.js" || { echo "Cage.js not bundled"; exit 1; }
+          grep -q "__toySetState" "$APP/Cage.js" || { echo "Cage.js looks wrong"; exit 1; }
+          codesign -d --entitlements - "$APP/ThinkingOfYou" 2>&1 | head -20 || true
+          echo "IPA verified"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThinkingOfYou-ipa
+          path: ThinkingOfYou.ipa
+          if-no-files-found: error
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/*.log
+            build/TestResults.xcresult
+          if-no-files-found: ignore
+
+      - name: GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ThinkingOfYou.ipa
