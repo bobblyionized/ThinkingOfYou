@@ -6,16 +6,25 @@
 //  Quick swap: tap the pill, swipe sideways on the top bar, or drag in from
 //  the screen edge (right edge in Instagram, left edge in Messages).
 //
+//  Every sheet's state lives here so a nudge tap can clear the way for the
+//  composer: SwiftUI won't stack a second sheet over Settings, the budget
+//  sheet or a Messages sheet.
+//
 //  Must stay `RootView()` with no parameters: ThinkingOfYouApp creates it and
 //  injects `AppEnvironment` via `.environment(env)`.
 
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var showingSettings = false
+    @State private var showingBudget = false
+    @State private var messagesSheet: MessagesSheet?
+    /// A composer draft held back while other sheets dismiss.
+    @State private var reroutingDraftID: UUID?
     @State private var edgeProgress: CGFloat = 0
     @State private var showingSent = false
     @State private var sentCount = 0
@@ -43,7 +52,8 @@ struct RootView: View {
                 MessagesView(people: env.people,
                              messages: env.messages,
                              snippets: env.snippets,
-                             nudges: env.nudges)
+                             nudges: env.nudges,
+                             sheet: $messagesSheet)
                     .modeLayer(isActive: mode == .messages,
                                restingOffset: 28,
                                tug: mode == .messages ? 18 * edgeProgress : 0)
@@ -78,6 +88,7 @@ struct RootView: View {
                 messages.composerFinished(outcome)
             }
             .ignoresSafeArea()
+            .interactiveDismissDisabled()
         }
         .alert("Missing contact details",
                isPresented: Binding(
@@ -88,10 +99,8 @@ struct RootView: View {
         } message: {
             Text(messages.alertMessage ?? "")
         }
-        .onChange(of: messages.composer) { _, newValue in
-            if newValue == nil, messages.lastOutcome == .sent {
-                flashSent()
-            }
+        .onChange(of: messages.composer?.id) { oldID, newID in
+            composerChanged(from: oldID, to: newID)
         }
     }
 
@@ -107,7 +116,7 @@ struct RootView: View {
 
             Spacer(minLength: Space.xs)
 
-            BudgetPillView(budget: env.budget)
+            BudgetPillView(budget: env.budget, isPresentingSheet: $showingBudget)
 
             Button {
                 showingSettings = true
@@ -147,8 +156,43 @@ struct RootView: View {
 
     private func choose(_ newMode: AppMode) {
         guard newMode != env.shell.mode else { return }
+        // Don't leave the Instagram DM keyboard hanging over Messages (or the
+        // search keyboard over Instagram).
+        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
         withAnimation(Motion.gentle(reduced: reduceMotion)) {
             env.shell.select(newMode)
+        }
+    }
+
+    /// Shows the composer even when another sheet is up (e.g. a nudge tapped
+    /// while Settings is open), and flashes "Message sent" afterwards.
+    private func composerChanged(from oldID: UUID?, to newID: UUID?) {
+        let messages = env.messages
+
+        if let newID {
+            if newID == reroutingDraftID {
+                // Our own re-presentation, now that the way is clear.
+                reroutingDraftID = nil
+                return
+            }
+            let blocked = showingSettings || showingBudget || messagesSheet != nil
+            guard blocked, let draft = messages.composer else { return }
+            reroutingDraftID = draft.id
+            messages.composer = nil
+            showingSettings = false
+            showingBudget = false
+            messagesSheet = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                messages.composer = draft
+            }
+            return
+        }
+
+        // Closed. Skip the close we caused while rerouting.
+        if let oldID, oldID != reroutingDraftID, messages.lastOutcome == .sent {
+            flashSent()
         }
     }
 

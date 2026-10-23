@@ -25,9 +25,9 @@ and log it under **Contract changes** at the bottom. Don't put logic in views.
 - **`RootView()` must keep a parameterless init.** `ThinkingOfYouApp`
   creates it. Every other view's init is yours to design. The stubs pass
   models explicitly: `InstagramView(model:budget:)`,
-  `MessagesView(people:messages:snippets:nudges:)`,
-  `PersonRowView(person:isPinned:)`, `SnippetsView(store:onPick:)`,
-  `NudgesView(model:)`, `BudgetPillView(budget:)` and `SettingsView(model:)`.
+  `MessagesView(people:messages:snippets:nudges:sheet:)`,
+  `PersonRowView(person:isPinned:messages:snippets:nudgeText:)`, `SnippetsView(store:onPick:)`,
+  `NudgesView(model:)`, `BudgetPillView(budget:isPresentingSheet:)` and `SettingsView(model:)`.
   Reading `env` instead is also fine.
 - **Previews:** `.environment(AppEnvironment.preview())` gives in-memory
   defaults and four sample people (`Person.samples`), and never touches
@@ -507,3 +507,10 @@ automatically.
     force an inbox reload even when the URL already is the inbox. A
     one-shot guard stops the `/reels/<code>/` to `/reel/<code>/` redirect
     from looping.
+- 2026-10-22: UI view inits (UI). `PersonRowView` is now
+  `PersonRowView(person:isPinned:messages:snippets:nudgeText:)`. All sheet
+  state now lives in `RootView` so a nudge tap can show the composer over any
+  open sheet, which changes two more inits:
+  `MessagesView(people:messages:snippets:nudges:sheet:)` takes a
+  `Binding<MessagesSheet?>`, and `BudgetPillView(budget:isPresentingSheet:)`
+  takes a `Binding<Bool>`. No model API changed.

@@ -8,16 +8,17 @@ import SwiftUI
 
 struct BudgetPillView: View {
     let budget: BudgetViewModel
-    @State private var showingSheet = false
+    /// Owned by RootView so it can close this sheet for the composer.
+    @Binding var isPresentingSheet: Bool
 
     var body: some View {
         Button {
-            showingSheet = true
+            isPresentingSheet = true
         } label: {
             pillLabel
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showingSheet) {
+        .sheet(isPresented: $isPresentingSheet) {
             BudgetSheetView(budget: budget)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
@@ -237,7 +238,7 @@ private struct LedgerRow: View {
 }
 
 #Preview("Pill") {
-    BudgetPillView(budget: AppEnvironment.preview().budget)
+    BudgetPillView(budget: AppEnvironment.preview().budget, isPresentingSheet: .constant(false))
         .padding()
         .background(Theme.paper)
 }

@@ -11,8 +11,8 @@ struct MessagesView: View {
     let messages: MessagesViewModel
     let snippets: SnippetsStore
     let nudges: NudgesViewModel
-
-    @State private var sheet: MessagesSheet?
+    /// Owned by RootView so it can close these sheets for the composer.
+    @Binding var sheet: MessagesSheet?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -440,6 +440,7 @@ private extension View {
 #Preview {
     let env = AppEnvironment.preview()
     return MessagesView(people: env.people, messages: env.messages,
-                        snippets: env.snippets, nudges: env.nudges)
+                        snippets: env.snippets, nudges: env.nudges,
+                        sheet: .constant(nil))
         .environment(env)
 }
